@@ -1,30 +1,39 @@
-<?php
-session_start();
-if (!isset($_SESSION['logged_in'])) {
-    header("Location: login.php");
+<?php 
+include 'config.php';
+
+if (!isset($_SESSION['is_admin']) || $_SESSION['is_admin'] != 1) {
+    header("Location: index.php");
     exit;
 }
 
+$error = '';
+$success = '';
+
 if ($_POST) {
     $name = trim($_POST['name']);
-    $desc = trim($_POST['description']);
-    if ($name) {
-        $dataFile = 'data/channels.json';
-        $channels = json_decode(file_get_contents($dataFile), true) ?: [];
+    $description = trim($_POST['description'] ?? '');
+
+    $image_path = null;
+    if (isset($_FILES['image']) && $_FILES['image']['error'] === 0) {
+        $allowed = ['jpg','jpeg','png','gif','webp'];
+        $ext = strtolower(pathinfo($_FILES['image']['name'], PATHINFO_EXTENSION));
         
-        $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $name)));
-        
-        $channels[] = [
-            'id' => time(),
-            'slug' => $slug,
-            'name' => $name,
-            'description' => $desc ?: 'No description',
-            'messages' => []
-        ];
-        
-        file_put_contents($dataFile, json_encode($channels, JSON_PRETTY_PRINT));
-        header("Location: index.php");
-        exit;
+        if (in_array($ext, $allowed)) {
+            $filename = time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+            $target = 'uploads/' . $filename;
+            
+            if (move_uploaded_file($_FILES['image']['tmp_name'], $target)) {
+                $image_path = $target;
+            }
+        } else {
+            $error = "Only JPG, PNG, GIF and WebP images are allowed.";
+        }
+    }
+
+    if (!$error && $name) {
+        $stmt = $pdo->prepare("INSERT INTO channels (name, description, image_path, created_by) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$name, $description, $image_path, $_SESSION['user_id']]);
+        $success = "Channel created successfully!";
     }
 }
 ?>
@@ -33,24 +42,46 @@ if ($_POST) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Channel</title>
+    <title>Create Channel - Telegram Reposts</title>
     <link rel="stylesheet" href="resources/tailwind.css">
     <link rel="stylesheet" href="resources/fontawesome.css">
     <style>body { background: #0a0a0a; }</style>
 </head>
-<body class="bg-[#0a0a0a] text-white min-h-screen flex items-center">
-    <div class="max-w-md mx-auto w-full px-6">
-        <a href="index.php" class="flex items-center gap-2 text-[#229ED9] mb-8"><i class="fas fa-arrow-left"></i> Back</a>
-        
-        <h1 class="text-3xl font-bold mb-8">Create New Channel</h1>
-        
-        <form method="post" class="space-y-6">
-            <input type="text" name="name" placeholder="Channel name (e.g. @MyChannel)" required
-                   class="w-full bg-[#1f1f1f] rounded-3xl px-6 py-5 text-lg">
-            <textarea name="description" placeholder="Description (optional)" rows="3"
-                      class="w-full bg-[#1f1f1f] rounded-3xl px-6 py-5 text-lg"></textarea>
-            <button type="submit" class="w-full bg-[#229ED9] py-5 rounded-3xl text-xl font-medium">Create Channel</button>
-        </form>
+<body class="text-white min-h-screen p-6">
+    <div class="max-w-lg mx-auto">
+        <a href="index.php" class="inline-flex items-center gap-2 text-[#229ED9] mb-8">
+            ← Back to Channels
+        </a>
+
+        <div class="bg-[#1f1f1f] rounded-3xl p-8">
+            <h1 class="text-3xl font-bold mb-6">Create New Channel</h1>
+
+            <?php if ($success): ?>
+                <p class="text-green-400 text-center mb-6"><?= $success ?></p>
+            <?php endif; ?>
+            <?php if ($error): ?>
+                <p class="text-red-400 text-center mb-6"><?= $error ?></p>
+            <?php endif; ?>
+
+            <form method="post" enctype="multipart/form-data" class="space-y-6">
+                <input type="text" name="name" placeholder="Channel Name (e.g. @NewsDaily)" required
+                       class="w-full bg-[#2a2a2a] rounded-2xl px-6 py-4 text-lg outline-none">
+
+                <textarea name="description" placeholder="Description (optional)" rows="3"
+                          class="w-full bg-[#2a2a2a] rounded-2xl px-6 py-4 text-lg outline-none"></textarea>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Channel Image (optional)</label>
+                    <input type="file" name="image" accept="image/*"
+                           class="w-full bg-[#2a2a2a] rounded-2xl px-6 py-4 text-lg">
+                </div>
+
+                <button type="submit" 
+                        class="w-full bg-[#229ED9] hover:bg-blue-600 py-4 rounded-2xl text-xl font-medium">
+                    Create Channel
+                </button>
+            </form>
+        </div>
     </div>
 </body>
 </html>

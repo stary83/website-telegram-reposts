@@ -1,113 +1,114 @@
-<?php
-session_start();
-$isLoggedIn = isset($_SESSION['logged_in']);
+<?php 
+include 'config.php';
 
-$dataFile = 'data/channels.json';
-$channels = json_decode(file_get_contents($dataFile), true) ?: [];
+$channel_id = $_GET['id'] ?? 0;
 
-$slug = $_GET['slug'] ?? '';
-$channel = null;
-foreach ($channels as $c) {
-    if ($c['slug'] === $slug) {
-        $channel = $c;
-        break;
-    }
-}
+$stmt = $pdo->prepare("SELECT * FROM channels WHERE id = ?");
+$stmt->execute([$channel_id]);
+$channel = $stmt->fetch();
+
 if (!$channel) {
     header("Location: index.php");
     exit;
 }
+
+// Fetch messages
+$stmt = $pdo->prepare("SELECT m.*, u.username, u.is_admin 
+                       FROM messages m 
+                       LEFT JOIN users u ON m.user_id = u.id 
+                       WHERE m.channel_id = ? 
+                       ORDER BY m.timestamp ASC");
+$stmt->execute([$channel_id]);
+$messages = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($channel['name']) ?> - Telegram Reposts</title>
-    
-    <!-- LOCAL CSS -->
+    <title><?= htmlspecialchars($channel['name']) ?></title>
     <link rel="stylesheet" href="resources/tailwind.css">
     <link rel="stylesheet" href="resources/fontawesome.css">
-    
     <style>
         body { background: #0a0a0a; }
-        .msg { max-width: 85%; }
-        .sent { background: #229ED9; border-radius: 20px 20px 4px 20px; }
-        .received { background: #1f1f1f; border-radius: 20px 20px 20px 4px; }
+        .bubble {
+            max-width: 78%;
+            padding: 12px 16px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        .admin-bubble { 
+            background: #229ED9; 
+            color: white; 
+            border-bottom-right-radius: 4px;
+            align-self: flex-end;
+        }
+        .user-bubble { 
+            background: #2d2d2d; 
+            color: #e5e5e5; 
+            border-bottom-left-radius: 4px;
+        }
     </style>
 </head>
-<body class="text-white flex flex-col min-h-screen">
+<body class="flex flex-col min-h-screen text-white">
     <!-- Header -->
-    <div class="bg-[#1f1f1f] px-4 py-4 flex items-center gap-4 sticky top-0 z-10 border-b border-gray-800">
-        <a href="index.php" class="text-3xl p-2 hover:bg-gray-800 rounded-xl">
-            <i class="fas fa-arrow-left"></i>
+    <div class="bg-[#1f1f1f] px-4 py-4 flex items-center gap-4 sticky top-0 border-b border-gray-700">
+        <a href="index.php" class="p-2">
+            <img src="resources/telegram-back.svg" width="28" height="28" alt="Back">
         </a>
-        <div>
-            <h1 class="text-2xl font-semibold"><?= htmlspecialchars($channel['name']) ?></h1>
-            <p class="text-xs text-gray-400"><?= htmlspecialchars($channel['description']) ?></p>
+        <div class="flex items-center gap-3">
+            <?php if ($channel['image_path']): ?>
+                <img src="<?= htmlspecialchars($channel['image_path']) ?>" class="w-11 h-11 rounded-2xl object-cover">
+            <?php else: ?>
+                <div class="w-11 h-11 bg-[#229ED9] rounded-2xl flex items-center justify-center text-3xl">
+                    <?= strtoupper(substr($channel['name'], 0, 1)) ?>
+                </div>
+            <?php endif; ?>
+            <div>
+                <h1 class="font-semibold"><?= htmlspecialchars($channel['name']) ?></h1>
+                <p class="text-xs text-gray-400">Public Channel</p>
+            </div>
         </div>
     </div>
 
     <!-- Messages -->
-    <div class="flex-1 p-4 overflow-y-auto space-y-8 pb-24" id="chat">
-        <?php
-        $messages = $channel['messages'] ?? [];
-        usort($messages, fn($a,$b) => strtotime($a['timestamp']) - strtotime($b['timestamp']));
-
-        $currentDate = '';
-        foreach ($messages as $msg):
+    <div class="flex-1 p-4 overflow-y-auto space-y-7 bg-[#0a0a0a]">
+        <?php 
+        $lastDate = '';
+        foreach ($messages as $msg): 
             $date = date('l, F j, Y', strtotime($msg['timestamp']));
-            if ($date !== $currentDate):
-                $currentDate = $date;
+            if ($date !== $lastDate):
+                $lastDate = $date;
         ?>
-            <div class="text-center text-xs text-gray-400 my-8"><?= $date ?></div>
+            <div class="text-center text-xs text-gray-500 my-10"><?= $date ?></div>
         <?php endif; ?>
-            <div class="flex <?= $msg['from'] === 'You' ? 'justify-end' : 'justify-start' ?>">
-                <div class="msg p-4 <?= $msg['from'] === 'You' ? 'sent' : 'received' ?>">
-                    <?php if (!empty($msg['file'])): ?>
-                        <?php if (preg_match('/\.(jpg|jpeg|png|gif|webp)$/i', $msg['file'])): ?>
-                            <img src="<?= htmlspecialchars($msg['file']) ?>" class="max-w-[280px] rounded-2xl mb-3">
-                        <?php else: ?>
-                            <a href="<?= htmlspecialchars($msg['file']) ?>" download class="flex items-center gap-2 text-blue-400 hover:text-blue-300">
-                                <i class="fas fa-paperclip"></i> <?= basename($msg['file']) ?>
-                            </a>
-                        <?php endif; ?>
-                    <?php endif; ?>
-                    <?php if ($msg['text']): ?>
-                        <p class="text-[17px] leading-relaxed"><?= nl2br(htmlspecialchars($msg['text'])) ?></p>
-                    <?php endif; ?>
-                    <div class="text-[10px] text-right mt-2 opacity-70">
+            <div class="flex <?= $msg['is_admin'] ? 'justify-end' : 'justify-start' ?>">
+                <div class="bubble <?= $msg['is_admin'] ? 'admin-bubble' : 'user-bubble' ?>">
+                    <p class="text-[16px] leading-relaxed"><?= nl2br(htmlspecialchars($msg['text'])) ?></p>
+                    <span class="text-[10px] opacity-70 block text-right mt-1">
                         <?= date('H:i', strtotime($msg['timestamp'])) ?>
-                    </div>
+                    </span>
                 </div>
             </div>
         <?php endforeach; ?>
-
-        <?php if (empty($messages)): ?>
-            <div class="text-center text-gray-400 py-20">No messages yet.</div>
-        <?php endif; ?>
     </div>
 
-    <!-- Send bar - only for logged in users -->
-    <?php if ($isLoggedIn): ?>
-    <form action="send-message.php" method="post" enctype="multipart/form-data" 
-          class="bg-[#1f1f1f] p-4 flex items-center gap-3 sticky bottom-0 border-t border-gray-800">
-        <input type="hidden" name="slug" value="<?= htmlspecialchars($slug) ?>">
-        <div class="flex-1 bg-[#2a2a2a] rounded-3xl px-5 py-3 flex items-center">
-            <input type="text" name="text" placeholder="Type a message..." 
-                   class="flex-1 bg-transparent outline-none text-lg placeholder-gray-400">
-            <label class="cursor-pointer ml-4 text-2xl text-gray-400 hover:text-white px-2">
-                <i class="fas fa-paperclip"></i>
-                <input type="file" name="file" class="hidden">
-            </label>
+    <!-- Send Bar - Only visible to Admin -->
+    <?php if (isset($_SESSION['is_admin']) && $_SESSION['is_admin'] == 1): ?>
+    <form action="send-message.php" method="post" class="bg-[#1f1f1f] p-4 border-t border-gray-700">
+        <input type="hidden" name="channel_id" value="<?= $channel_id ?>">
+        <div class="flex gap-3">
+            <input type="text" name="text" placeholder="Type a message..." required
+                   class="flex-1 bg-[#2a2a2a] rounded-full px-6 py-4 outline-none">
+            <button type="submit" class="bg-[#229ED9] px-8 rounded-full font-medium">
+                Send
+            </button>
         </div>
-        <button type="submit" class="w-12 h-12 bg-[#229ED9] rounded-3xl flex items-center justify-center text-2xl">
-            <i class="fas fa-paper-plane"></i>
-        </button>
     </form>
     <?php else: ?>
-        <div class="bg-[#1f1f1f] p-4 text-center text-sm text-gray-400 border-t border-gray-800">
-            <a href="login.php" class="text-[#229ED9] hover:underline">Login as admin</a> to send messages
+        <div class="bg-[#1f1f1f] p-4 text-center text-sm text-gray-400 border-t border-gray-700">
+            Login as admin to send messages in this channel
         </div>
     <?php endif; ?>
 </body>

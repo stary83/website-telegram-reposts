@@ -1,45 +1,19 @@
-<?php
-session_start();
+<?php 
+include 'config.php';
 
-// Only logged-in users can send messages
-if (!isset($_SESSION['logged_in'])) {
-    header("Location: login.php");
+if (!isset($_SESSION['is_admin']) || $_SESSION['is_admin'] != 1) {
+    header("Location: index.php");
     exit;
 }
 
-$slug = $_POST['slug'] ?? '';
+$channel_id = $_POST['channel_id'] ?? 0;
 $text = trim($_POST['text'] ?? '');
-$filePath = null;
 
-if (isset($_FILES['file']) && $_FILES['file']['error'] === 0) {
-    $ext = strtolower(pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION));
-    $allowed = ['jpg','jpeg','png','gif','webp','pdf','zip','mp4','txt'];
-    if (in_array($ext, $allowed)) {
-        $newName = 'uploads/' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-        if (move_uploaded_file($_FILES['file']['tmp_name'], $newName)) {
-            $filePath = $newName;
-        }
-    }
+if ($channel_id && $text) {
+    $stmt = $pdo->prepare("INSERT INTO messages (channel_id, user_id, text) VALUES (?, ?, ?)");
+    $stmt->execute([$channel_id, $_SESSION['user_id'], $text]);
 }
 
-$dataFile = 'data/channels.json';
-$channels = json_decode(file_get_contents($dataFile), true) ?: [];
-
-foreach ($channels as &$ch) {
-    if ($ch['slug'] === $slug) {
-        $ch['messages'][] = [
-            'id'        => time(),
-            'text'      => $text,
-            'file'      => $filePath,
-            'timestamp' => date('Y-m-d H:i:s'),
-            'from'      => 'You'
-        ];
-        break;
-    }
-}
-
-file_put_contents($dataFile, json_encode($channels, JSON_PRETTY_PRINT));
-
-header("Location: channel.php?slug=" . urlencode($slug));
+header("Location: channel.php?id=" . $channel_id);
 exit;
 ?>
